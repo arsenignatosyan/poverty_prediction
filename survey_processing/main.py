@@ -66,23 +66,23 @@ def process_dhs(dhs_data_dir):
 
     # check we have DHS data for each country in config file
     print('Checking file integrity...')
-    if not check_file_integrity(dhs_data_dir, config_data['countries'], dhs_cc):
+    if not check_file_integrity(dhs_data_dir, config_data['all_DHS'], dhs_cc):
         raise FileNotFoundError('DHS data incomplete')
 
     # create DataFrames storing dhs data, and if possible create DataFrames with poverty deprivation indicators
     dhs_dfs, pov_dfs = get_dhs_and_pov_dfs(dhs_data_dir)
                 
     # aggregate to the cluster level
-    dhs_df_all = agg_dhs_dfs(dhs_dfs)
+    # dhs_df_all = agg_dhs_dfs(dhs_dfs)
     pov_df_all = agg_pov_dfs(pov_dfs)
     centroid_df = get_geo_data(dhs_data_dir)
     
     # merge dhs, poverty data and GPS data on centroid ID/id
     merged_centroid_df = pd.merge(centroid_df, pov_df_all, left_on='CENTROID_ID', right_on='id', how='left')
-    merged_centroid_df = pd.merge(merged_centroid_df, dhs_df_all, left_on='CENTROID_ID', right_on='id', how='left')
-
+    # merged_centroid_df = pd.merge(merged_centroid_df, dhs_df_all, left_on='CENTROID_ID', right_on='id', how='left')
+    
     # remove some cols after join
-    merged_centroid_df = merged_centroid_df.drop(["hhid", "indid", "id_x", "id_y", "year_interview"], axis=1)
+    merged_centroid_df = merged_centroid_df.drop(["hhid", "indid", "id", "year_interview"], axis=1)
 
     # min/max scale cols
     df_processed = min_max_scale(merged_centroid_df)
@@ -117,10 +117,12 @@ def get_dhs_and_pov_dfs(dhs_data_dir):
     dhs_dfs = []
     print('Creating DHS and Poverty DataFrames...')
     for f in tqdm(os.listdir(dhs_data_dir)):
+        if not any(x in f for x in config_data["all_DHS"]):
+            continue
         if 'DHS' in f:
-            dhs_df, create_pov_df_flag = create_dhs_dataframe(dhs_data_dir + f + '/')
+            dhs_df, _ = create_dhs_dataframe(dhs_data_dir + f + '/')
             dhs_dfs.append(dhs_df)
-            if create_pov_df_flag:
+            if len(set.intersection(set(dhs_df.columns), set(config_data["vars_needed"]))) == len(config_data["vars_needed"]):
                 pov_df = create_poverty_dataframe(dhs_df, dhs_data_dir + f + '/')
                 pov_dfs.append(pov_df)  
 
@@ -160,34 +162,41 @@ def create_dhs_dataframe(path, save_csv=True):
     dhs_pr, missing_pr_cols = get_pr(household_datafile)
     dhs_ir, missing_ir_cols = get_ir(individual_datafile)
     
+    # print(dhs_kr.head())
+    # print(dhs_pr.head())
+    # print(dhs_ir.head())
     # before any joins we need to check that it is possible
     # note that some older datasets have no child line numbers in KR
     df = dhs_kr.copy()
     if ("hv001" in dhs_pr.columns) and ("hv002" in dhs_pr.columns) and ("hvidx" in dhs_pr.columns) \
         and ("hvidx" in dhs_kr.columns):
         # KR outer join to PR
-        df = df.merge(dhs_pr, how="outer", on=["hv001", "hv002", "hvidx"])
+        cols_to_use = list(dhs_pr.columns.difference(df.columns)) + ["hv001", "hv002", "hvidx"]
+        df = df.merge(dhs_pr[cols_to_use], how="outer", on=["hv001", "hv002", "hvidx"])
 
     if ("hv001" in dhs_ir.columns) and ("hv002" in dhs_ir.columns) and ("hvidx" in dhs_ir.columns) \
         and ("hvidx" in dhs_kr.columns):
         # IR outer join to PR/KR
-        df = df.merge(dhs_ir, how="outer", on=["hv001", "hv002", "hvidx"])
+        cols_to_use = list(dhs_ir.columns.difference(df.columns)) + ["hv001", "hv002", "hvidx"]
+        df = df.merge(dhs_ir[cols_to_use], how="outer", on=["hv001", "hv002", "hvidx"])
 
     # remove all adults, if hv105 doesn't exist then we must be dealing with just the KR (MD_1997 and TZ_1999)
     if "hv105" in df:
         df = df[df["hv105"] < 18]
 
     # replace/rename ultimate area code (v004) and v001 with hv001
-    if "hv001" in df.columns:
-        df = df.drop("v004", axis=1)     
-    else:
-        df = df.rename(columns={"v004" : "hv001"})
+    if "v004" in df.columns:
+        if "hv001" in df.columns:
+            df = df.drop("v004", axis=1)     
+        else:
+            df = df.rename(columns={"v004" : "hv001"})
     
     # replace/rename country code
-    if ("hv000" in df.columns):
-        df = df.drop("v000", axis=1)
-    else:
-        df = df.rename(columns={"v000" : "hv000"})
+    if "v000" in df.columns:
+        if "hv000" in df.columns:
+            df = df.drop("v000", axis=1)
+        else:
+            df = df.rename(columns={"v000" : "hv000"})
 
     # add survey year column from name of folder it's contained in
     survey_year = path.split('/')[-2][3:7]
@@ -228,23 +237,24 @@ def get_kr(path):
 
     # create missing cols indicator, get list of columns we want to get from KR
     missing_kr_cols = False
-    cols_from_kr = config_data["KR_vars_to_keep"]
+    # cols_from_kr = config_data["matches"] + config_data["categorical_columns"] + ["v004", "v000"]
+    # cols_from_kr = config_data["KR_vars_to_keep"]
 
     # read KR
     dhs_kr = pd.read_stata(path, convert_categoricals=False)
-
+    # print(dhs_kr.columns)
     # we move age in months from hw1 to b19 if b19 not available
     if 'b19' not in dhs_kr.columns:
         dhs_kr['b19'] = dhs_kr['hw1']
 
     # subset columns of KR and update missing cols flag
-    cols_to_subset = []
-    for col in cols_from_kr:
-        if col in dhs_kr.columns:
-            cols_to_subset.append(col)
-        else:
-            missing_kr_cols = True
-    dhs_kr = dhs_kr[cols_to_subset]
+    # cols_to_subset = []
+    # for col in cols_from_kr:
+    #     if col in dhs_kr.columns:
+    #         cols_to_subset.append(col)
+    #     # else:
+    #     #     missing_kr_cols = True
+    # dhs_kr = dhs_kr[cols_to_subset]
 
     # add child weight column
     dhs_kr['chweight'] = dhs_kr['v005'] / 1000000
@@ -280,19 +290,20 @@ def get_pr(path):
 
     # create missing cols indicator, get list of columns we want to get from PR
     missing_pr_cols = False
-    cols_from_pr = config_data["PR_vars_to_keep"]
+    # cols_from_pr = config_data["matches"] + config_data["categorical_columns"] + ["v004", "v000"]
+    # cols_from_pr = config_data["PR_vars_to_keep"]
 
     # read PR file
     dhs_pr = pd.read_stata(path, convert_categoricals=False)
-    
-    # subset columns of PR and update missing_pr_cols flag
-    cols_to_subset = []
-    for col in cols_from_pr:
-        if col in dhs_pr.columns:
-            cols_to_subset.append(col)
-        else:
-            missing_pr_cols = True
-    dhs_pr = dhs_pr[cols_to_subset]
+    # print(dhs_pr.columns)
+    # # subset columns of PR and update missing_pr_cols flag
+    # cols_to_subset = []
+    # for col in cols_from_pr:
+    #     if col in dhs_pr.columns:
+    #         cols_to_subset.append(col)
+    #     # else:
+    #     #     missing_pr_cols = True
+    # dhs_pr = dhs_pr[cols_to_subset]
     
     # add household weight column
     dhs_pr['hhweight'] = dhs_pr['hv005'] / 1000000
@@ -317,19 +328,20 @@ def get_ir(path):
 
     # create missing cols indicator, get list of columns we want to get from IR
     missing_ir_cols = False
-    cols_from_ir = config_data["IR_vars_to_keep"]
+    # cols_from_ir = config_data["matches"] + config_data["categorical_columns"] + ["v004", "v000"]
+    # cols_from_ir = config_data["IR_vars_to_keep"]
 
      # read IR file
     dhs_ir = pd.read_stata(path, convert_categoricals=False)
-
-    # subset columns of IR and update missing_ir_cols flag
-    cols_to_subset = []
-    for col in cols_from_ir:
-        if col in dhs_ir.columns:
-            cols_to_subset.append(col)
-        else:
-            missing_ir_cols = True
-    dhs_ir = dhs_ir[cols_to_subset]
+    # print(dhs_ir.columns)
+    # # subset columns of IR and update missing_ir_cols flag
+    # cols_to_subset = []
+    # for col in cols_from_ir:
+    #     if col in dhs_ir.columns:
+    #         cols_to_subset.append(col)
+    #     # else:
+    #     #     missing_ir_cols = True
+    # dhs_ir = dhs_ir[cols_to_subset]
 
     # rename identifier columns of IR
     dhs_ir = dhs_ir.rename(columns={"v001" : "hv001", "v002" : "hv002", "v003" : "hvidx"})
@@ -354,7 +366,7 @@ def create_poverty_dataframe(df, path_to_save, save_csv=True):
     """
 
     ## get deprivation for the 5 pillars of child poverty + orphanhood
-
+    
     df = get_orphanhood_depr(df)
     df = get_housing_depr(df)
     df = get_water_depr(df)
@@ -402,6 +414,7 @@ def create_poverty_dataframe(df, path_to_save, save_csv=True):
     df['year_interview_range'] = f"{year2_min}-{year2_max}"
     
     # Rename variables to make them more intuitive
+    df.drop(columns=["hhid"], inplace=True)
     df = df.rename(columns={
         "hv001" : "cluster",
         "hv002" : "hhid",
@@ -456,7 +469,6 @@ def create_poverty_dataframe(df, path_to_save, save_csv=True):
     
     # reset index
     df = df.reset_index(drop=True)
-
     # Sort and order DataFrame
     df.sort_values(by=['cluster', 'hhid', 'indid'], inplace=True)
 
@@ -837,21 +849,27 @@ def agg_dhs_dfs(dhs_dfs):
     """
 
     # we will remove rows if variables are above these thresholds
-    thresholds = config_data['thresholds']
+    thresholds = config_data['dhs_variable_lim']
 
     # categorical columns to one hot encode
-    columns_to_encode = config_data['categorical']
+    columns_to_encode = config_data['categorical_columns']
 
     # dhs variables we want to keep in our DataFrame
-    matches = config_data['dhs_vars_to_keep']
+    matches = config_data['matches']
 
     # store all our DHS DataFrames in this list
     dhs_dfs_agg = []
     print('Aggregating DHS Data By Cluster')
+    idx = 0
     for df in tqdm(dhs_dfs):
         ccode = df.loc[0, 'countrycode']
         year = str(df.loc[0, "year"])
-
+        df = df.loc[:,~df.columns.duplicated()].copy()
+        df.reset_index(inplace=True)
+        with open(f'your_file{idx}.txt', 'w') as f:
+            for line in df.columns:
+                f.write(f"{line}\n")
+        idx += 1
         # remove rows of whose columns are NaN or above a certain threshold
         for column, threshold in thresholds.items():
             if column in df.columns:
@@ -863,31 +881,42 @@ def agg_dhs_dfs(dhs_dfs):
 
         # one hot encode
         df = pd.get_dummies(df, columns=filtered_columns_to_encode)
+        existing_cols = [col for col in matches if col in df.columns]
+        print(df.columns)
+        # also grab names of cols we want to keep that have the correct prefix 'col_'
+        additional_cols = []
+        for col in matches:
+            if col not in df.columns:
+                pattern_cols = [c for c in df.columns if c.startswith(f"{col}_")]
+                additional_cols.extend(pattern_cols)
+        cols_to_select = existing_cols + additional_cols
+        df = df[list(set(cols_to_select))]
 
         # group by averaging over the cluster
         df_agg = df.select_dtypes(include=[np.number, bool]).groupby('hv001').agg('mean').reset_index()
 
         # add id column so we can join to poverty data and GPS data later
         df_agg['id'] = ccode + year + df_agg['hv001'].apply(make_string)
-
+        print(df_agg.head())
+        print(df_agg.columns)
         dhs_dfs_agg.append(df_agg)
 
     # concat dhs data vertically
     dhs_df_all = pd.concat(dhs_dfs_agg)
 
     # grab names of dhs variables we want to keep
-    existing_cols = [col for col in matches if col in dhs_df_all.columns]
+    # existing_cols = [col for col in matches if col in dhs_df_all.columns]
 
-    # also grab names of cols we want to keep that have the correct prefix 'col_'
-    additional_cols = []
-    for col in matches:
-        if col not in dhs_df_all.columns:
-            pattern_cols = [c for c in dhs_df_all.columns if c.startswith(f"{col}_")]
-            additional_cols.extend(pattern_cols)
-    cols_to_select = existing_cols + additional_cols + ['id']
+    # # also grab names of cols we want to keep that have the correct prefix 'col_'
+    # additional_cols = []
+    # for col in matches:
+    #     if col not in dhs_df_all.columns:
+    #         pattern_cols = [c for c in dhs_df_all.columns if c.startswith(f"{col}_")]
+    #         additional_cols.extend(pattern_cols)
+    # cols_to_select = existing_cols + additional_cols + ['id']
 
     # remove all cols not selected
-    dhs_df_all = dhs_df_all[list(set(cols_to_select))]
+    # dhs_df_all = dhs_df_all[list(set(cols_to_select))]
 
     # drop duplicates and reset index of dataframes before merge
     dhs_df_all.drop_duplicates(inplace=True)
@@ -921,6 +950,7 @@ def agg_pov_dfs(pov_dfs):
         df_agg['id'] = ccode + year + df_agg['cluster'].apply(make_string)
         poverty_dfs_agg.append(df_agg)
 
+    # print(poverty_dfs_agg)
     # vertically concat all poverty data
     pov_df_all = pd.concat(poverty_dfs_agg)
 
