@@ -21,22 +21,11 @@ To access DHS data, please follow these steps:
     For the following country and years, select ALL STATA and Geographic Data.
     | Country      | Year(s) |
     |--------------|---------|
-    | Zambia       | 2007, 2013, 2018|
     | Malawi       | 2000, 2004, 2010, 2015|
     | Uganda       | 2000, 2006, 2011, 2016|
-    | Comoros      | 2012|
     | Tanzania     | 1999, 2010, 2015, 2022|
-    | Kenya        | 2003, 2008, 2014, 2022|
-    | Angola       | 2015    |
-    | Ethiopia     | 2000, 2005, 2011, 2016, 2019|
-    | Rwanda       | 2005, 2007, 2010, 2014, 2019|
-    | Lesotho      | 2004, 2009, 2014    |
     | Madagascar   | 1997, 2008, 2021|
     | Zimbabwe     | 1999, 2005, 2010, 2015|
-    | Burundi      | 2010, 2016    |
-    | Mozambique   | 2011    |
-    | Eswatini     | 2006    |
-    | South Africa | 2016    |
 
     The folders should be unzipped and store in `survey_processing/dhs_data/` (e.g. `survey_processing/dhs_data/` should contain subfolders of "ET_20XX_DHS_XXX..." etc. ).
 ---
