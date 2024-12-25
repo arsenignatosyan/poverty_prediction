@@ -108,7 +108,7 @@ def create_square(center_lat, center_lon, side_length_km):
     """
     return create_rectangle(center_lat, center_lon, side_length_km, side_length_km)
 
-def get_project_name(config_filepath='config/google_config.json'):
+def get_project_name(config_filepath='imagery_scraping/config/google_config.json'):
     """
     Retrieves the project name from a configuration file.
 
