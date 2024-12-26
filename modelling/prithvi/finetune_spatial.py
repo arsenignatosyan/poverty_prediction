@@ -188,8 +188,7 @@ def main(fold, imagery_path, batch_size, normalize):
         devices=1,
         logger=tb_logger,
         accumulate_grad_batches=4,
-        check_val_every_n_epoch=1,
-        val_check_interval=1,
+        val_check_interval=1.0,
         enable_progress_bar=True,
         callbacks=[model_checkpoint_callback, early_stopping_callback, batch_size_finder]
     )
