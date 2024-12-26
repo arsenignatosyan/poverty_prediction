@@ -11,7 +11,7 @@ import torch
 import torchvision.transforms as transforms
 from lightning import LightningDataModule, Trainer
 from lightning.pytorch import loggers as pl_loggers
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, BatchSizeFinder
 from lightning.pytorch.tuner.tuning import Tuner
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
@@ -23,7 +23,7 @@ from .prithvi_regressor import PrithviRegressionModel
 
 def main(fold, imagery_path, batch_size, normalize):
     normalization = 30000.
-    imagery_size = 336
+    imagery_size = 224
 
     data_folder = r'survey_processing/processed_data'
 
@@ -171,10 +171,8 @@ def main(fold, imagery_path, batch_size, normalize):
             return DataLoader(val_dataset, batch_size=self.batch_size, shuffle=False)
 
     data_module = LandsatDataset()
-    train_dataloader = data_module.train_dataloader()
-    val_dataloader = data_module.val_dataloader()
-    num_train_batches = (len(train_dataloader) // batch_size)
-
+    # train_dataloader = data_module.train_dataloader()
+    # val_dataloader = data_module.val_dataloader()
     regression_module = PrithviRegressionModel()
 
     model_save_name = f'modelling/prithvi/model/Prithvi100M_{fold}/'
@@ -183,21 +181,21 @@ def main(fold, imagery_path, batch_size, normalize):
                                                 save_last=True,
                                                 monitor="eval/mae", mode="min")
     early_stopping_callback = EarlyStopping(monitor="eval/mae", patience=7, mode="min")
-    # batch_size_finder = BatchSizeFinder(mode="power", init_val=1)
-
+    batch_size_finder = BatchSizeFinder(mode="power", init_val=1)
+    
     trainer = Trainer(
+        accelerator="gpu",
+        devices=1,
         logger=tb_logger,
         accumulate_grad_batches=4,
         check_val_every_n_epoch=1,
         val_check_interval=1,
-        limit_train_batches=num_train_batches,
         enable_progress_bar=True,
-        # callbacks=[model_checkpoint_callback, early_stopping_callback, batch_size_finder]
-        callbacks=[model_checkpoint_callback, early_stopping_callback]
+        callbacks=[model_checkpoint_callback, early_stopping_callback, batch_size_finder]
     )
     tuner = Tuner(trainer=trainer)
-    tuner.lr_find(model=regression_module, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
-    trainer.fit(model=regression_module, train_dataloaders=train_dataloader, val_dataloaders=val_dataloader)
+    tuner.lr_find(model=regression_module, datamodule=data_module, num_training=20)
+    trainer.fit(model=regression_module, datamodule=data_module)
 
 
 if __name__ == '__main__':
