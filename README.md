@@ -96,6 +96,36 @@ python survey_processing/main.py survey_processing/dhs_data
 
 would create 5 splits of the training and test data for spatial analysis and before/after 2020 split for temporal analysis.
 
+## Experiment with Prithvi100M
+
+Note that this method only supports Landsat imagery, and to use this method you need to download `Prithvi100M.pt` saved model weights using the instuctions provided [here](https://github.com/NASA-IMPACT/hls-foundation-os/tree/main). After downloading the model weights, move it to the `modelling/prithvi` folder.
+
+After having the splits in `survey_processing/processed_data`, you can finetune Prithvi100M using the following commands. For the spatial experiment with Landsat imagery, you can use the following code.
+
+```bash
+python -m modelling.prithvi.finetune_spatial --fold 5 --imagery_path landsat_data --freeze 12 --batch_size 256 --normalize
+```
+
+For the temporal experiment with Landsat imagery, you can use the following code.
+
+```bash
+python -m modelling.prithvi.finetune_temporal --imagery_path landsat_data --freeze 9 --batch_size 256 --normalize
+```
+
+To conduct the experiments provided in the paper you can simply run the following command.
+
+```bash
+./run.sh
+```
+
+To evaluate a trained model (spatial or temporal), you can use the following code.
+
+```bash
+python -m modelling.prithvi.evaluate --mode spatial --imagery_path landsat_data --freeze 12 --use_checkpoint
+```
+
+
+
 ## Experiment with MOSAIKS
 
 The MOSAIKS features were extracted using [IDinsight](https://github.com/IDinsight/mosaiks#mosaiks-satellite-imagery-featurization) package. A [notebook](modelling/mosaiks/main.ipynb) is provided in this repository for getting all features for MOSAIKS.
