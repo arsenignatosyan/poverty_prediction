@@ -17,19 +17,21 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 
 warnings.filterwarnings("ignore")
+import os
+
+# os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 
 from .prithvi_regressor import PrithviRegressionModel
 
 
-def main(imagery_path, batch_size, normalize):
+def main(imagery_path, normalize, batch_size, freeze_layer):
     normalization = 30000.
     imagery_size = 224
 
     data_folder = r'survey_processing/processed_data'
 
-    train_df = pd.read_csv(f'{data_folder}/before_2020.csv', index_col=0)
-    test_df = pd.read_csv(f'{data_folder}/after_2020.csv', index_col=0)
-
+    train_df = pd.read_csv(f'{data_folder}/before_2020.csv')
+    test_df = pd.read_csv(f'{data_folder}/after_2020.csv')
     available_imagery = []
     for d in os.listdir(imagery_path):
         if d[-2] == "L":
@@ -174,15 +176,15 @@ def main(imagery_path, batch_size, normalize):
     data_module = LandsatDataset()
     # train_dataloader = data_module.train_dataloader()
     # val_dataloader = data_module.val_dataloader()
-    regression_module = PrithviRegressionModel()
+    regression_module = PrithviRegressionModel(freeze_block_until=freeze_layer)
 
-    model_save_name = f'modelling/prithvi/model/Prithvi100M_temporal/'
+    model_save_name = f'modelling/prithvi/model/Prithvi100M_temporal_{freeze_layer}/'
     tb_logger = pl_loggers.TensorBoardLogger(save_dir="logs/", name=model_save_name)
-    model_checkpoint_callback = ModelCheckpoint(dirpath=os.path.join("models", model_save_name), save_top_k=1,
+    model_checkpoint_callback = ModelCheckpoint(dirpath=model_save_name, save_top_k=1,
                                                 save_last=True,
                                                 monitor="eval/mae", mode="min")
-    early_stopping_callback = EarlyStopping(monitor="eval/mae", patience=7, mode="min")
-    batch_size_finder = BatchSizeFinder(mode="power", init_val=1)
+    early_stopping_callback = EarlyStopping(monitor="eval/mae", patience=5, mode="min")
+    # batch_size_finder = BatchSizeFinder(mode="power", init_val=1)
     
     trainer = Trainer(
         accelerator="gpu",
@@ -191,7 +193,7 @@ def main(imagery_path, batch_size, normalize):
         accumulate_grad_batches=4,
         val_check_interval=1.0,
         enable_progress_bar=True,
-        callbacks=[model_checkpoint_callback, early_stopping_callback, batch_size_finder]
+        callbacks=[model_checkpoint_callback, early_stopping_callback]
     )
     tuner = Tuner(trainer=trainer)
     tuner.lr_find(model=regression_module, datamodule=data_module, num_training=20)
@@ -200,7 +202,8 @@ def main(imagery_path, batch_size, normalize):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run satellite image processing model training.')
     parser.add_argument('--imagery_path', type=str, help='The parent directory of all imagery')
-    parser.add_argument('--batch_size', type=int, help='Batch size')
     parser.add_argument('--normalize', action='store_true')
+    parser.add_argument('--freeze', type=int, default=None, help='Block number until which to freeze the network')
+    parser.add_argument('--batch_size', type=int, default=256, help='Batch Size')
     args = parser.parse_args()
-    main(imagery_path=args.imagery_path, batch_size=args.batch_size, normalize=args.normalize)
+    main(imagery_path=args.imagery_path, normalize=args.normalize, batch_size=args.batch_size, freeze_layer=args.freeze)

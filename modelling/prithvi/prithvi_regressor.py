@@ -15,40 +15,35 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class PrithviRegressionModel(LightningModule):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, freeze_block_until=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         backbone_model, embed_dim = load_model()
         self.patch_embed = backbone_model.patch_embed
         self.blocks = backbone_model.blocks
         self.norm = backbone_model.norm
         self.final_layer = nn.Linear(embed_dim, 1)
-        # self.model = nn.Sequential(*self.backbone).to(DEVICE)
-
-        # if FREEZE_LAYER:
-        #     self.freeze_layers(up_until=FREEZE_LAYER)
-        # self.model = torch.compile(self.model)
-        # print(self.model)
+        
+        self.freeze_layers(block_up_until=freeze_block_until)
         self.loss_fn = L1Loss()
         self.lr = 1e-05
 
-        # for name, param in self.model.named_parameters():
-        #     print(name, param.requires_grad)
-        # print(sum(p.numel() for p in self.model.parameters() if p.requires_grad))
-
-    def freeze_layers(self, up_until=5):
-        for param in self.model.parameters():
-            param.requires_grad = False
-
-        if up_until >= len(self.model.blocks):
-            up_until = -1
-
-        for param in self.model.blocks[up_until:].parameters():
-            param.requires_grad = True
-
-        for name, param in self.model.named_parameters():
-            print(name, param.requires_grad)
-        print(sum(p.numel() for p in self.model.parameters() if p.requires_grad))
-
+    def freeze_layers(self, block_up_until=9):
+        if block_up_until != None:
+            self.patch_embed.requires_grad_(False)
+            for blk_id, blk in enumerate(self.blocks):
+                if blk_id < block_up_until:
+                    blk.requires_grad_(False)
+                else:
+                    blk.requires_grad_(True)
+            self.norm.requires_grad_(True)
+            self.final_layer.requires_grad_(True)
+        else:
+            self.patch_embed.requires_grad_(True)
+            for blk in self.blocks:
+                blk.requires_grad_(True)
+            self.norm.requires_grad_(True)
+            self.final_layer.requires_grad_(True)
+        
     @staticmethod
     def compute_metrics(preds, targets):
         mae = mean_absolute_error(y_true=targets, y_pred=preds)
@@ -88,7 +83,7 @@ class PrithviRegressionModel(LightningModule):
 
     def configure_optimizers(self):
         optimizer = AdamW(self.parameters(), lr=self.lr)
-        scheduler = CosineAnnealingLR(optimizer=optimizer, T_max=500)
+        scheduler = CosineAnnealingLR(optimizer=optimizer, T_max=50)
 
         return {"optimizer": optimizer, "lr_scheduler": scheduler}
 
@@ -148,3 +143,8 @@ def load_model():
     ])
 
     return model, embed_dim
+
+
+if __name__ == "__main__":
+    mod = PrithviRegressionModel()
+    print(mod.modules)
